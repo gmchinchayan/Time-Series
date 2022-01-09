@@ -1,0 +1,409 @@
+---
+title: "TimeSeries Report"
+author: "Gustavo Chinchayan"
+date: "12/15/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### A) Load the necessary libraries for this assignment
+
+
+library(forecast)
+
+library(ggplot2)
+
+library("readxl") this tool allows me to view the excel file for viewing purposes
+
+library(tseries)
+
+
+
+```{r cars, include=FALSE}
+library(forecast) 
+library(ggplot2)
+library("readxl") #this tool allows me to view the excel file for viewing purposes
+library(tseries)
+```
+
+#### B) Extract Dataset
+
+```{r}
+elecdata=read_excel("Elec-train.xlsx")
+head(elecdata)
+```
+Summary tool provides a summary statistics on the column of the data frame
+
+```{r}
+summary(elecdata)
+```
+
+Do a Time Series forecast for Consumption (kW) without taking into account outdoor temperature and then do another Time series for Consumption with outdoor temperature in consideration.
+
+#### B) Initate Time-series - Consumption (kW) without outdoor temperature
+
+observations are every 15 minutes, convert it to an hour. This is 60/15 = 4, this is the rate for hourly frequency. 
+
+As observed below we also notice that the dataset where both Power(kW) and Temp (C) end on row 4507. 
+
+```{r}
+elecdata[c(4507,4508), ]
+```
+
+Thus, create a Time-series consumption from 1/10/2010 to 2/16/2010 between Row 1 and 4507
+Each quarter represents a 15 min interval, and use this new data-set as a way to view that every row is an hour. This Allows for better visualization for the graphs.
+
+```{r}
+elec_con <- ts(elecdata[1:4507,2], frequency = 4, start=c(1,2))
+head(elec_con)
+tail(elec_con)
+```
+
+
+#### C) Plotting the Data
+
+Consumption vs. Hourly
+
+```{r}
+autoplot(elec_con) +
+  ggtitle('Consumption vs Hourly') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (Kw)') 
+```
+
+#### D) Splitting Data
+
+Make two sets of data, Train Data set (80%) and the Test Data set (20%), in order to run a proper time series forecast to evaluate the model appropriately, Since using the new elecdataset this will mean at 900 rows as Train and 227 rows remaining as the Test.
+
+
+```{r}
+elec_con_train= window(elec_con, start=c(1,2), end=c(902,4))
+elec_con_test= window(elec_con, start=c(903,1), end=c(1127,4))
+autoplot(elec_con_train,series='Train Dataset') + 
+  autolayer(elec_con_test,series='Test Dataset')+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+#### E) Tesing on Different Models
+
+Start forecasting with Simple Exponential Smoothing (SES) without a smoothing parameter in alpha.
+
+```{r}
+elec_con_SES = ses(elec_con_train,h=900, alpha=NULL)
+
+```
+
+```{r}
+autoplot(elec_con_train,series="Train Dataset") + 
+  autolayer(elec_con_test,series='Test Dataset')+
+  autolayer(elec_con_SES$mean,series='SES')+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+
+Compute the root mean square error (RMSE) of each model
+
+```{r}
+print(sqrt(mean((elec_con_SES$mean-elec_con_test)^2)))
+```
+SES is a bad forecasting tool for this, so we move onto more sophisticated models with more parameters.
+Such as the usage of Holt-Winters Model
+
+Additive Seasonal HW 
+
+```{r}
+elec_con_HW_add = hw(elec_con_train, seasonal='additive',h=900)
+```
+
+
+Damped additive seasonal HW
+
+```{r}
+elec_con_DHW_add = hw(elec_con_train, seasonal='additive',h=900,damped=TRUE)
+```
+
+and
+
+Add Box-Cox Transformation for stabilization purposes to the the Damped additive seasonal HW
+
+```{r}
+elec_con_DHW_addBC = hw(elec_con_train, seasonal='additive',h=900,damped=TRUE, lambda = 'auto')
+```
+
+
+
+Plot both Models to view their forecasting
+
+```{r}
+autoplot(elec_con_train,series="Train Dataset") + 
+  autolayer(elec_con_test,series='Test Dataset')+
+  autolayer(elec_con_HW_add$mean,series='Additive seasonal HW')+
+  autolayer(elec_con_DHW_add$mean,series='Damped additive seasonal HW')+
+  autolayer(elec_con_DHW_addBC$mean,series='Damped Additive seasonal HW with Box-Cox')+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+
+Compute the root mean square error (RMSE) of each model
+
+```{r}
+print(sqrt(mean((elec_con_HW_add$mean-elec_con_test)^2)))
+print(sqrt(mean((elec_con_DHW_add$mean-elec_con_test)^2)))
+print(sqrt(mean((elec_con_DHW_addBC$mean-elec_con_test)^2)))
+```
+There is not much difference comparing the RMSE errors for all different types of Holt-Winters models, As observed, the errors of both the Damped HW and Damped HW with Box-Cox remain the same as the Exponential Smoothing. Additionally, the Additive Seasonal HW error performs the worse, this may be due to the fact they are linear models. One more thing to note, as seen for Box-Cox, the Lambda is set to automatically, and not chosen which may be the case why it performs badly. 
+
+
+Forecast with ARIMA Model to see if there is any difference to previous models
+
+```{r}
+elec_con_ARIMA = auto.arima(elec_con_train)
+pred_elec_con_ARIMA = forecast(elec_con_ARIMA,h=900)
+autoplot(elec_con_train,series="Train Dataset") + 
+  autolayer(elec_con_test,series='Test Dataset')+
+  autolayer(pred_elec_con_ARIMA,series='ARIMA',PI=FALSE)+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+visually the Model predicts the Test set better than previous models observed. 
+
+```{r}
+print(sqrt(mean((pred_elec_con_ARIMA$mean-elec_con_test)^2)))
+```
+
+Upon checking with the RMSE error. although the Error is lower than previous model, it still doesn't do good predictions as the model is able to forecast with very little significance, it then converges to zero as the ARIMA usually used in a stationary data set.
+
+
+An Augmented Dicker Fuller Test, can prove that the this data-set is indeed stationary as the P-value is less than .05, Reject the Null hypothesis in other words it has some time-dependent structure and does not have a constant variance over time
+
+
+```{r}
+adf.test(elec_con_train)
+adf.test(elec_con_test)
+```
+
+To proceed, a Correlation test can be used to identify patterns using the Auto-correlation plot and Partial Auto-correlation plot.
+
+```{r}
+ggAcf(elec_con_train)
+ggPacf(elec_con_train)
+```
+
+Theoretically, autocorrelation is the correlation between two values in a time series, the lags represent points of time in the data-set.
+As observed, the lags are sitting outside the 95% confidence interval which can mean that the lags may correlate between themselves. The autocorrelation function declines to near zero rapidly for a stationary time series. In this instance ACF and PACF prove this. 
+
+
+Lastly, it is possible to use a Neural Network to make better predictions of the Test Data set. 
+
+```{r}
+elec_con_train_NN = nnetar(elec_con_train)
+pred_elec_con_train_NN = forecast(elec_con_train_NN, h = 900)
+autoplot(elec_con_train,series="Train Dataset") + 
+  autolayer(elec_con_test,series='Test Dataset')+
+  autolayer(pred_elec_con_train_NN$mean,series='Neural Network')+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+Visually, this model is likely the best model when comparing to the previous models for making predictions.
+
+```{r}
+print(sqrt(mean((pred_elec_con_train_NN $mean-elec_con_test)^2)))
+```
+
+Computing the RMSE, gives an error rate that is the most least compared to previous models. Itis acceptable as it is doing a better prediction.
+
+For better observations of predictions from the Neural Network, here the NN is predicted against the Test Dataset. 
+It is not particularly the best at modelling, but it far more dominant model compared to previous ones. This particular model will be used to forecast predictions in consumption
+
+```{r}
+autoplot(elec_con_test,series='Test Dataset') + 
+  autolayer(pred_elec_con_train_NN$mean,series='Neural Network')+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+96 observations to represent 24 hours as an entire day. Predictions are made to forecast consumption for the the next day for 17/2/2010.
+
+```{r}
+elec_con_2 = nnetar(elec_con, lambda = 'auto')
+pred_con = forecast(elec_con_2, h = 96)
+autoplot(elec_con,series="Power Consumption between 1/1/2010 and 16/1/2010") + 
+  autolayer(pred_con$mean,series='Neural Network Prediction for 17/2/2010')+
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+Lastly, to assume that the residuals are independent and identically distributed. 
+
+```{r}
+checkresiduals(elec_con)
+```
+
+
+```{r eval=FALSE, include=FALSE}
+Prediction_Con = print(pred_con)
+```
+
+File is saved
+
+```{r eval=FALSE, include=FALSE}
+write.csv(Prediction_Con, file = 'ForecastPredictionswConsumption.csv' )
+```
+
+#### F) Initate Time-series - Consumption (kW) with outdoor temperature into consideration
+
+Again, from 1/10/2010 to 2/16/2010 between Row 1 and 4507
+Each quarter represents a 15 min interval, and we will use this new data-set as a way to view that every row is an hour.
+
+```{r}
+temp <- ts(elecdata[1:4507,3], frequency = 4, start=c(1,2))
+head(temp)
+tail(temp)
+```
+
+#### G) Splitting Data
+
+Again here. Make two sets of data, Train Data set (80%) and the Test Data set (20%), in order to run a proper time series forecast to evaluate the model appropriately Since  we are using the new elecdataset this will mean at 900 rows as Train and 227 rows remaining as the Test.
+
+```{r}
+temp_train=window(temp, start=c(1,2), end=c(902,4))
+temp_test=window(temp, start=c(903,1), end=c(1127,4))
+```
+
+#### H) Time-Series Linear Regression Model
+
+In this part, a time-series regression model will first need to be made in order to prove the effect of outdoor temperature on electricity consumption (kW) exists.
+
+```{r}
+temp_con_train=tslm(elec_con_train~temp_train)
+summary(temp_con_train)
+```
+
+The P-value is less than .05, which means that we reject Null Hypothesis, and state that there exists an effect of outdoor temperature on electricity consumption (kW).
+
+To further validate, Season is added to the existing Time-series regression model to see if there is any effect on this data-set.
+
+```{r}
+temp_con_train_season=tslm(elec_con_train~temp_train + season)
+summary(temp_con_train_season)
+```
+P value in this instance is more than .05, thus accept Null hypothesis, season is not statistically significant.
+Season 2, Season 3, and Season 4, thus meaning that season plays no impact on this Time Series model
+
+
+Sample Coefficient of Variation is used to see the scores.
+
+```{r}
+CV(temp_con_train_season)
+```
+
+Furthermore, Trend can also be added instead to the existing Time-series regression model to see if there is any effect on this data-set.
+
+```{r}
+temp_con_train_trend=tslm(elec_con_train~temp_train + trend)
+summary(temp_con_train_trend)
+```
+The P-value is less than .05, which means that we reject Null Hypothesis, and state that there exists an effect of Trend pattern on electricity consumption (kW), meaning it is Statistically significant. 
+
+Sample Coefficient of Variation is used to see the scores.
+
+```{r}
+CV(temp_con_train_trend)
+```
+
+
+
+```{r}
+checkresiduals(temp_con_train_trend,test="LB",plot=TRUE)
+```
+
+Here the residual are correlated, which means that this regression model (which assumes independent residuals) is not appropriated.
+
+Instead, its recommended to then form Dynamic regression model modelizes the residuals with an ARIMA p,d,q model. The choice of the orders p, d, q can be done by examining the residuals or automatically with the auto.arima function.
+
+```{r}
+temp_con_train_arima = auto.arima(elec_con_train, xreg=temp_train)
+```
+
+Checking resuiduals and A L-jung test is performed with the ARIMA model.
+
+```{r}
+checkresiduals(temp_con_train_arima, test='LB', plot = TRUE)
+```
+
+With an ARIMA model of (2,1,2): Auto-correlations of the residuals have modeled
+
+A L-jung P-value > 0.05, can make the assumption that these values are not dependent.
+
+
+#### H) Dynamic Regression and Neural Network Model with Outdoor Temperature
+
+
+Since the Nueral network model was a good model to make future predictions, this model will be used to forecast future predictions to also include Outdoor Temperature
+
+Forecast predictions with ARIMA mode on Test Data-set
+
+```{r}
+pred_test_temp = forecast(temp_con_train_arima, xreg = temp_test, h=900)
+
+elec_con_train_NN_temp = nnetar(elec_con_train, lambda = 'auto', xreg = temp_train)
+pred_elec_con_train_NN_temp = forecast(elec_con_train_NN_temp, h=900, xreg =temp_test)
+
+autoplot(elec_con_train, series='Train Dataset') +
+  autolayer(elec_con_test, series='Test Dataset') +
+  autolayer(pred_elec_con_train_NN_temp$mean,series='Neural Network with Temperature') +
+  autolayer(pred_test_temp$mean, series='Dynamic Rgression Model with Temperature') + 
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+
+Following previos step, a Time series for temperature data set is created
+
+```{r}
+temp_forecast <- ts(elecdata[4509:4603,3], frequency = 4, start=c(1,2))
+head(temp_forecast)
+tail(temp_forecast)
+```
+
+
+```{r}
+elec_con_train_NN_temp = nnetar(elec_con, lambda = 'auto', xreg = temp)
+pred_elec_con_train_NN_temp = forecast(elec_con_train_NN_temp, h=900, xreg =temp_forecast)
+
+autoplot(elec_con,series="Power Consumption between 1/1/2010 and 16/1/2010") + 
+  autolayer(pred_elec_con_train_NN_temp$mean,series='NN w/ Temp Predictions for 17/2/2021') +
+  ggtitle ('Electricity Consumption (kW) per Hour Rate') +
+  xlab('Hourly (60min)') +
+  ylab('Consumption (kW)')
+```
+
+
+```{r eval=FALSE, include=FALSE}
+Prediction_Con_temp = print(pred_elec_con_train_NN_temp)
+```
+Save the File
+```{r eval=FALSE, include=FALSE}
+write.csv(Prediction_Con_temp, file = 'ForecastPredictionswConsumptionwithTemp.csv' )
+```
+
+In Conclusion:
+The Neural Network model is the best model amongst other models to predict and forecast Consumption of kW with Temperature, statistical analysis like this can allow data scientists understand the rules of understanding time series with different factors.
+
+
